@@ -256,6 +256,15 @@ namespace System.Text.RegularExpressions.Generator
             writer.WriteLine($"    /// <summary>Creates an instance of a <see cref=\"RegexRunner\"/> used by methods on <see cref=\"Regex\"/>.</summary>");
             writer.WriteLine($"    protected override RegexRunner CreateInstance() => new Runner();");
             writer.WriteLine();
+            writer.WriteLine($"    /// <summary>A per-thread cached runner for this pattern.</summary>");
+            writer.WriteLine($"    [ThreadStatic] private static Runner? t_runner;");
+            writer.WriteLine($"    /// <summary>Opt into Regex deferring runner lifecycle to this factory.</summary>");
+            writer.WriteLine($"    protected override bool SupportsRunnerRental => true;");
+            writer.WriteLine($"    /// <summary>Claim the per-thread runner (allocating if none / if reentrant).</summary>");
+            writer.WriteLine($"    protected override RegexRunner RentRunner() {{ Runner? r = t_runner; t_runner = null; return r ?? new Runner(); }}");
+            writer.WriteLine($"    /// <summary>Return the runner to the per-thread slot.</summary>");
+            writer.WriteLine($"    protected override void ReturnRunner(RegexRunner runner) => t_runner = (Runner)runner;");
+            writer.WriteLine();
             writer.WriteLine($"    /// <summary>Provides the runner that contains the custom logic implementing the specified regular expression.</summary>");
             writer.WriteLine($"    private sealed class Runner : RegexRunner");
             writer.WriteLine($"    {{");

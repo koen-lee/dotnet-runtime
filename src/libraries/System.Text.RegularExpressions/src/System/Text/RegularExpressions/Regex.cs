@@ -573,7 +573,7 @@ namespace System.Text.RegularExpressions
                 ThrowHelper.ThrowArgumentOutOfRangeException(ExceptionArgument.length, ExceptionResource.LengthNotNegative);
             }
 
-            RegexRunner runner = Interlocked.Exchange(ref _runner, null) ?? CreateRunner();
+            RegexRunner runner = RentRunner();
             try
             {
                 runner.InitializeTimeout(internalMatchTimeout);
@@ -605,7 +605,7 @@ namespace System.Text.RegularExpressions
             finally
             {
                 runner.runtext = null; // drop reference to text to avoid keeping it alive in a cache.
-                _runner = runner;
+                ReturnRunner(runner);
             }
         }
 
@@ -618,7 +618,7 @@ namespace System.Text.RegularExpressions
             // that takes in startat.
             Debug.Assert(startat <= input.Length);
 
-            RegexRunner runner = Interlocked.Exchange(ref _runner, null) ?? CreateRunner();
+            RegexRunner runner = RentRunner();
             try
             {
                 runner.InitializeTimeout(internalMatchTimeout);
@@ -665,7 +665,7 @@ namespace System.Text.RegularExpressions
             }
             finally
             {
-                _runner = runner;
+                ReturnRunner(runner);
             }
         }
 
@@ -681,7 +681,7 @@ namespace System.Text.RegularExpressions
             Debug.Assert(inputString is null || inputSpan.SequenceEqual(inputString));
             Debug.Assert((uint)startat <= (uint)inputSpan.Length);
 
-            RegexRunner runner = Interlocked.Exchange(ref _runner, null) ?? CreateRunner();
+            RegexRunner runner = RentRunner();
             try
             {
                 runner.runtext = inputString;
@@ -751,7 +751,7 @@ namespace System.Text.RegularExpressions
             finally
             {
                 runner.runtext = null; // drop reference to string to avoid keeping it alive in a cache.
-                _runner = runner;
+                ReturnRunner(runner);
             }
         }
 
@@ -800,6 +800,32 @@ namespace System.Text.RegularExpressions
             // The factory needs to be set by the ctor.  `factory` is a protected field, so it's possible a derived
             // type nulls out the factory after we've set it, but that's the nature of the design.
             factory!.CreateInstance();
+
+        private RegexRunner RentRunner() =>
+            factory!.SupportsRunnerRental
+                ? factory.RentRunner()
+                : Interlocked.Exchange(ref _runner, null) ?? CreateRunner();
+
+        private void ReturnRunner(RegexRunner runner)
+        {
+            // The cached runner (per-thread, or per-Regex-instance via _runner) outlives this call,
+            // so make sure it does not pin the caller's input. runtext is already cleared by the
+            // string paths; also drop the Match's text reference (Match.Reset re-sets it on the
+            // next scan). This keeps the leak bounded to the reusable runner+arrays.
+            runner.runtext = null;
+            if (runner.runmatch is Match m)
+            {
+                m.Text = null;
+            }
+            if (factory!.SupportsRunnerRental)
+            {
+                factory.ReturnRunner(runner);
+            }
+            else
+            {
+                _runner = runner;
+            }
+        }
 
         /// <summary>True if the <see cref="RegexOptions.Compiled"/> option was set.</summary>
         [Obsolete(Obsoletions.RegexExtensibilityImplMessage, DiagnosticId = Obsoletions.RegexExtensibilityDiagId, UrlFormat = Obsoletions.SharedUrlFormat)]
